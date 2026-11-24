@@ -33,6 +33,7 @@ import com.chronodisrup.chronoplay.data.remote.TrackDto
 import com.chronodisrup.chronoplay.data.repository.MurielRepository
 import com.chronodisrup.chronoplay.player.PlaybackController
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import java.util.Locale
 
 private enum class Destination(val label: String) { HOME("Home"), DISCOVER("Discover"), SEARCH("Search"), LIBRARY("Library") }
@@ -106,6 +107,16 @@ private fun ChronoRoot(context: Context) {
         }
     }
 
+    fun loadLyrics(track: TrackDto) {
+        val repo = repository ?: run { error = "Configure Muriel in Settings first."; return }
+        scope.launch {
+            loading = true
+            try { lyrics = repo.lyrics(track); showLyrics = true }
+            catch (e: Exception) { error = e.message ?: "Could not load lyrics." }
+            finally { loading = false }
+        }
+    }
+
     fun download(track: TrackDto) {
         val repo = repository ?: run { error = "Configure Muriel in Settings first."; return }
         scope.launch {
@@ -128,7 +139,7 @@ private fun ChronoRoot(context: Context) {
         containerColor = Color(0xFF090909),
         bottomBar = {
             Column {
-                currentTrack?.let { MiniPlayer(it, onClick = { PlaybackController.toggle() }) }
+                currentTrack?.let { MiniPlayer(it, onToggle = { PlaybackController.toggle() }, onLyrics = { loadLyrics(it) }) }
                 NavigationBar(containerColor = Color(0xFF101010), tonalElevation = 0.dp) {
                     Destination.entries.forEach { dest ->
                         val icon = when (dest) {
@@ -292,7 +303,7 @@ private fun TrackRow(track: TrackDto, onPlay: (TrackDto) -> Unit, onDownload: (T
 }
 
 @Composable
-private fun MiniPlayer(track: TrackDto, onToggle: () -> Unit) {
+private fun MiniPlayer(track: TrackDto, onToggle: () -> Unit, onLyrics: () -> Unit) {
     Surface(color = Color(0xFF1B1B1B), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.GraphicEq, null, tint = ChronoOrange, modifier = Modifier.size(28.dp))
@@ -301,6 +312,7 @@ private fun MiniPlayer(track: TrackDto, onToggle: () -> Unit) {
                 Text(track.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(track.artist, color = Color.Gray, fontSize = 10.sp, maxLines = 1)
             }
+            IconButton(onClick = onLyrics) { Icon(Icons.Default.Lyrics, "Lyrics", tint = Color.LightGray) }
             IconButton(onClick = onToggle) { Icon(Icons.Default.PlayArrow, "Play or pause", tint = Color.White) }
         }
     }
