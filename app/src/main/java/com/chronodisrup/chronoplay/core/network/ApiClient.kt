@@ -7,21 +7,21 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object ApiClient {
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-
-    fun create(baseUrl: String): MurielApi {
+    fun create(baseUrl: String, token: String = "hellozhou"): MurielApi {
         require(baseUrl.startsWith("https://") || baseUrl.startsWith("http://")) {
             "Server URL must start with http:// or https://"
         }
         require(baseUrl.endsWith("/")) { "Server URL must end with /" }
-        return Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(httpClient)
-            .addConverterFactory(GsonConverterFactory.create())
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder().header("X-Muriel-Token", token).build()
+                chain.proceed(request)
+            }
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .build()
-            .create(MurielApi::class.java)
+        return Retrofit.Builder().baseUrl(baseUrl).client(client)
+            .addConverterFactory(GsonConverterFactory.create()).build().create(MurielApi::class.java)
     }
 }
