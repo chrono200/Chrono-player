@@ -11,9 +11,14 @@ private val Context.chronoDataStore by preferencesDataStore(name = "chrono_play_
 
 class SettingsStore(private val context: Context) {
     private val serverKey = stringPreferencesKey("muriel_server_url")
+    private val tokenKey = stringPreferencesKey("muriel_server_token")
     val serverUrl: Flow<String> = context.chronoDataStore.data.map { it[serverKey] ?: "" }
+    val serverToken: Flow<String> = context.chronoDataStore.data.map { it[tokenKey] ?: "hellozhou" }
 
-    suspend fun setServerUrl(value: String) {
-        context.chronoDataStore.edit { it[serverKey] = value.trim().trimEnd('/') + "/" }
+    suspend fun saveConnection(url: String, token: String) {
+        context.chronoDataStore.edit {
+            it[serverKey] = url.trim().trimEnd('/') + "/"
+            it[tokenKey] = token.trim()
+        }
     }
 }
