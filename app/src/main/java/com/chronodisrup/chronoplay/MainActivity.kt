@@ -29,9 +29,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.chronodisrup.chronoplay.core.designsystem.ChronoOrange
 import com.chronodisrup.chronoplay.core.designsystem.ChronoTheme
-import com.chronodisrup.chronoplay.core.settings.SettingsStore
+import com.chronodisrup.chronoplay.data.local.LocalMediaEngine
 import com.chronodisrup.chronoplay.data.remote.TrackDto
-import com.chronodisrup.chronoplay.data.repository.MurielRepository
 import com.chronodisrup.chronoplay.player.PlaybackController
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
@@ -54,7 +53,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ChronoRoot(context: Context) {
     val scope = rememberCoroutineScope()
-    val settings = remember { SettingsStore(context) }
+    val localEngine = remember { LocalMediaEngine(context) }
     var serverUrl by remember { mutableStateOf("") }
     var serverToken by remember { mutableStateOf("hellozhou") }
     var repository by remember { mutableStateOf<MurielRepository?>(null) }
