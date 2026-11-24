@@ -125,13 +125,11 @@ private fun ChronoRoot(context: Context) {
                         NavigationBarItem(selected = selected == dest, onClick = {
                             selected = dest
                             if (dest == Destination.LIBRARY) scope.launch {
-                                val deviceTracks = queryDeviceDownloads(context)
-                                val serverTracks = runCatching { repository?.offlineLibrary().orEmpty() }.getOrDefault(emptyList())
-                                library = deviceTracks + serverTracks
+                                library = localEngine.downloadedTracks()
                             }
                             if (dest == Destination.DISCOVER) scope.launch {
                                 loading = true
-                                try { discover = repository?.discover(emptyList(), emptyList()).orEmpty() } catch (e: Exception) { error = e.message }
+                                try { discover = localEngine.search("new music 2026", "youtube") } catch (e: Exception) { error = e.message }
                                 finally { loading = false }
                             }
                         }, icon = { Icon(icon, dest.label) }, label = { Text(dest.label, fontSize = 10.sp) },
@@ -148,7 +146,7 @@ private fun ChronoRoot(context: Context) {
                     Text("CHRONO", color = ChronoOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("PLAY", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 }
-                IconButton(onClick = { settingsDraft = serverUrl; tokenDraft = serverToken; showSettings = true }) { Icon(Icons.Default.Settings, "Settings", tint = Color.LightGray) }
+                Text("NO SERVER NEEDED", color = Color.Gray, fontSize = 9.sp, letterSpacing = 1.sp)
             }
             when (selected) {
                 Destination.HOME -> HomeContent(trending, loading, ::play, ::download, onExplore = { selected = Destination.SEARCH })
@@ -163,39 +161,13 @@ private fun ChronoRoot(context: Context) {
                             finally { loading = false }
                         }
                     }, onPlay = ::play, onDownload = ::download)
-                Destination.DISCOVER -> TrackList("Discover", "Recommendations from Muriel", discover, loading, ::play, ::download)
-                Destination.LIBRARY -> TrackList("Your library", "Device downloads and your Muriel server cache", library, loading, ::play, ::download)
+                Destination.DISCOVER -> TrackList("Discover", "Fresh music from YouTube search", discover, loading, ::play, ::download)
+                Destination.LIBRARY -> TrackList("Your library", "Downloaded to Music/CHRONO PLAY", library, loading, ::play, ::download)
             }
             error?.let { message ->
                 Text(message, color = ChronoOrange, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp))
             }
         }
-    }
-
-    if (showSettings) {
-        AlertDialog(onDismissRequest = { showSettings = false }, containerColor = Color(0xFF171717),
-            title = { Text("Muriel connection", color = Color.White) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Enter the base URL of your running Muriel Server. Example: https://your-server.example/ or http://192.168.1.10:38472/", color = Color.LightGray, fontSize = 13.sp)
-                    OutlinedTextField(value = settingsDraft, onValueChange = { settingsDraft = it }, singleLine = true,
-                        placeholder = { Text("https://your-muriel-server/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        label = { Text("Server URL") })
-                    OutlinedTextField(value = tokenDraft, onValueChange = { tokenDraft = it }, singleLine = true,
-                        label = { Text("Muriel access token") }, placeholder = { Text("hellozhou") }, visualTransformation = PasswordVisualTransformation())
-                    Text("Muriel defaults to hellozhou unless MURIEL_TOKEN is set on your server. Use HTTPS on public networks. HTTP is suitable only on a trusted local network.", color = Color.Gray, fontSize = 11.sp)
-                }
-            },
-            confirmButton = { TextButton(onClick = {
-                scope.launch {
-                    val cleaned = settingsDraft.trim()
-                    if (cleaned.startsWith("https://") || cleaned.startsWith("http://")) {
-                        settings.saveConnection(cleaned, tokenDraft)
-                        showSettings = false
-                    } else error = "Enter a valid http:// or https:// server URL."
-                }
-            }) { Text("Save", color = ChronoOrange) } },
-            dismissButton = { TextButton(onClick = { showSettings = false }) { Text("Cancel", color = Color.LightGray) } })
     }
 
     if (showLyrics) {
@@ -214,14 +186,14 @@ private fun HomeContent(tracks: List<TrackDto>, loading: Boolean, onPlay: (Track
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("YOUR SOUND. YOUR TIME.", color = ChronoOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
                     Text("Find your next favourite.", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-                    Text("Search across YouTube, YouTube Music and SoundCloud through your Muriel server.", color = Color(0xFFB4A7A2), fontSize = 13.sp)
+                    Text("Search music and save tracks straight to your phone. No account or server setup.", color = Color(0xFFB4A7A2), fontSize = 13.sp)
                     Button(onClick = onExplore, colors = ButtonDefaults.buttonColors(containerColor = ChronoOrange, contentColor = Color.Black)) { Text("Explore music", fontWeight = FontWeight.Bold) }
                 }
             }
         }
-        item { SectionTitle("Trending now", "Fresh picks from your Muriel server") }
+        item { SectionTitle("Ready when you are", "Search, play and download directly on this device") }
         if (loading && tracks.isEmpty()) item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = ChronoOrange) }
-        if (tracks.isEmpty() && !loading) item { EmptyState("Connect Muriel to load trending music.") }
+        if (tracks.isEmpty() && !loading) item { EmptyState("Open Search to find music. Downloads are saved to Music/CHRONO PLAY.") }
         items(tracks) { TrackRow(it, onPlay, onDownload) }
     }
 }
@@ -254,7 +226,7 @@ private fun TrackList(title: String, subtitle: String, tracks: List<TrackDto>, l
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { SectionTitle(title, subtitle) }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = ChronoOrange)
-        if (tracks.isEmpty() && !loading) EmptyState("Nothing here yet. Connect Muriel or try Discover.")
+        if (tracks.isEmpty() && !loading) EmptyState("Nothing here yet. Search for music and download your first track.")
         LazyColumn(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(tracks) { TrackRow(it, onPlay, onDownload) }
         }
