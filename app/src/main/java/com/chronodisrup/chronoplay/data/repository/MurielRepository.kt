@@ -33,11 +33,13 @@ class MurielRepository(private val baseUrl: String, token: String) {
     suspend fun lyrics(track: TrackDto) = api.lyrics(track.title, track.artist, track.duration ?: 0.0).lyrics.orEmpty()
     suspend fun discover(history: List<TrackSeed>, favorites: List<TrackSeed>) =
         api.discover(RecommendationRequest(history = history, favorites = favorites)).tracks
-    suspend fun download(track: TrackDto): String {
+    suspend fun download(track: TrackDto): DownloadResponse {
         val url = track.url ?: throw IllegalStateException("This track has no source URL.")
         val response = api.download(url, track.id, track.title, track.artist)
-        return response.downloadUrl?.takeIf { response.success && it.isNotBlank() }
-            ?: throw IllegalStateException(response.error ?: "Download failed.")
+        if (!response.success || response.downloadUrl.isNullOrBlank()) {
+            throw IllegalStateException(response.error ?: "Download failed.")
+        }
+        return response
     }
     suspend fun offlineLibrary() = api.offlineLibrary().tracks
     suspend fun toolsStatus() = api.toolsStatus()
