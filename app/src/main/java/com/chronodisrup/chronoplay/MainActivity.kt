@@ -1,13 +1,19 @@
 package com.chronodisrup.chronoplay
 
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,120 +22,279 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.chronodisrup.chronoplay.core.designsystem.ChronoOrange
 import com.chronodisrup.chronoplay.core.designsystem.ChronoTheme
+import com.chronodisrup.chronoplay.core.settings.SettingsStore
+import com.chronodisrup.chronoplay.data.remote.TrackDto
+import com.chronodisrup.chronoplay.data.repository.MurielRepository
+import com.chronodisrup.chronoplay.player.PlaybackController
+import kotlinx.coroutines.launch
+import java.util.Locale
 
-private enum class Destination(val label: String) {
-    HOME("Home"), DISCOVER("Discover"), SEARCH("Search"), LIBRARY("Library")
-}
+private enum class Destination(val label: String) { HOME("Home"), DISCOVER("Discover"), SEARCH("Search"), LIBRARY("Library") }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ChronoTheme { ChronoRoot() } }
+        PlaybackController.connect(this)
+        setContent { ChronoTheme { ChronoRoot(this) } }
+    }
+    override fun onDestroy() {
+        if (isFinishing) PlaybackController.release()
+        super.onDestroy()
     }
 }
 
 @Composable
-private fun ChronoRoot() {
+private fun ChronoRoot(context: Context) {
+    val scope = rememberCoroutineScope()
+    val settings = remember { SettingsStore(context) }
+    var serverUrl by remember { mutableStateOf("") }
+    var repository by remember { mutableStateOf<MurielRepository?>(null) }
     var selected by remember { mutableStateOf(Destination.HOME) }
-    var showPlayer by remember { mutableStateOf(false) }
+    var platform by remember { mutableStateOf("youtube") }
+    var query by remember { mutableStateOf("") }
+    var tracks by remember { mutableStateOf<List<TrackDto>>(emptyList()) }
+    var trending by remember { mutableStateOf<List<TrackDto>>(emptyList()) }
+    var discover by remember { mutableStateOf<List<TrackDto>>(emptyList()) }
+    var library by remember { mutableStateOf<List<TrackDto>>(emptyList()) }
+    var currentTrack by remember { mutableStateOf<TrackDto?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
+    var lyrics by remember { mutableStateOf("") }
+    var settingsDraft by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        settings.serverUrl.collect { saved ->
+            serverUrl = saved
+            repository = saved.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let { runCatching { MurielRepository(it) }.getOrNull() }
+        }
+    }
+    LaunchedEffect(repository) {
+        val repo = repository ?: return@LaunchedEffect
+        loading = true
+        error = null
+        try { trending = repo.trending() } catch (e: Exception) { error = e.message ?: "Could not load Muriel data." }
+        finally { loading = false }
+    }
+
+    fun play(track: TrackDto) {
+        val repo = repository ?: run { error = "Add your Muriel server URL in Settings first."; return }
+        currentTrack = track
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val streamUrl = repo.stream(track)
+                PlaybackController.connect(context) { ready ->
+                    if (ready) PlaybackController.play(streamUrl, track.title, track.artist)
+                    else error = "The playback service could not start."
+                }
+            } catch (e: Exception) { error = e.message ?: "Unable to play this track." }
+            finally { loading = false }
+        }
+    }
+
+    fun download(track: TrackDto) {
+        val repo = repository ?: run { error = "Configure Muriel in Settings first."; return }
+        scope.launch {
+            loading = true
+            try {
+                val remote = repo.download(track)
+                val request = DownloadManager.Request(Uri.parse(remote))
+                    .setTitle(track.title)
+                    .setDescription("CHRONO PLAY • ${track.artist}")
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "CHRONO PLAY/${safeFileName(track.artist + " - " + track.title)}.mp3")
+                (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                error = "Download queued: ${track.title}"
+            } catch (e: Exception) { error = e.message ?: "Download failed." }
+            finally { loading = false }
+        }
+    }
+
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color(0xFF090909),
         bottomBar = {
             Column {
-                MiniPlayer(onClick = { showPlayer = true })
+                currentTrack?.let { MiniPlayer(it, onClick = { PlaybackController.toggle() }) }
                 NavigationBar(containerColor = Color(0xFF101010), tonalElevation = 0.dp) {
-                    Destination.entries.forEach { destination ->
-                        val icon = when (destination) {
+                    Destination.entries.forEach { dest ->
+                        val icon = when (dest) {
                             Destination.HOME -> Icons.Default.Home
                             Destination.DISCOVER -> Icons.Default.Explore
                             Destination.SEARCH -> Icons.Default.Search
                             Destination.LIBRARY -> Icons.Default.LibraryMusic
                         }
-                        NavigationBarItem(
-                            selected = selected == destination,
-                            onClick = { selected = destination },
-                            icon = { Icon(icon, contentDescription = destination.label) },
-                            label = { Text(destination.label, fontSize = 10.sp) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = ChronoOrange,
-                                selectedTextColor = ChronoOrange,
-                                indicatorColor = Color(0xFF2B1712),
-                                unselectedIconColor = Color(0xFF777777),
-                                unselectedTextColor = Color(0xFF777777)
-                            )
-                        )
+                        NavigationBarItem(selected = selected == dest, onClick = {
+                            selected = dest
+                            if (dest == Destination.LIBRARY) scope.launch { runCatching { library = repository?.offlineLibrary().orEmpty() } }
+                            if (dest == Destination.DISCOVER) scope.launch {
+                                loading = true
+                                try { discover = repository?.discover(emptyList(), emptyList()).orEmpty() } catch (e: Exception) { error = e.message }
+                                finally { loading = false }
+                            }
+                        }, icon = { Icon(icon, dest.label) }, label = { Text(dest.label, fontSize = 10.sp) },
+                            colors = NavigationBarItemDefaults.colors(selectedIconColor = ChronoOrange, selectedTextColor = ChronoOrange,
+                                indicatorColor = Color(0xFF2B1712), unselectedIconColor = Color.Gray, unselectedTextColor = Color.Gray))
                     }
                 }
             }
         }
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("CHRONO", color = ChronoOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                    Text("PLAY", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                }
+                IconButton(onClick = { settingsDraft = serverUrl; showSettings = true }) { Icon(Icons.Default.Settings, "Settings", tint = Color.LightGray) }
+            }
             when (selected) {
-                Destination.HOME -> HomeScreen()
-                Destination.DISCOVER -> SimpleScreen("Discover", "Find your next obsession.")
-                Destination.SEARCH -> SimpleScreen("Search", "Search will connect to your Muriel server in the next build.")
-                Destination.LIBRARY -> SimpleScreen("Your library", "Your saved music will live here.")
+                Destination.HOME -> HomeContent(trending, loading, ::play, ::download, onExplore = { selected = Destination.SEARCH })
+                Destination.SEARCH -> SearchContent(query, { query = it }, platform, { platform = it }, tracks, loading,
+                    onSearch = {
+                        val repo = repository
+                        if (repo == null) error = "Connect your Muriel server in Settings."
+                        else scope.launch {
+                            loading = true; error = null
+                            try { tracks = repo.search(query.trim(), platform) }
+                            catch (e: Exception) { error = e.message ?: "Search failed." }
+                            finally { loading = false }
+                        }
+                    }, onPlay = ::play, onDownload = ::download)
+                Destination.DISCOVER -> TrackList("Discover", "Recommendations from Muriel", discover, loading, ::play, ::download)
+                Destination.LIBRARY -> TrackList("Offline cache", "Tracks cached on your Muriel server", library, loading, ::play, ::download)
             }
-            if (showPlayer) {
-                PlayerSheet(onClose = { showPlayer = false })
+            error?.let { message ->
+                Text(message, color = ChronoOrange, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp))
             }
+        }
+    }
+
+    if (showSettings) {
+        AlertDialog(onDismissRequest = { showSettings = false }, containerColor = Color(0xFF171717),
+            title = { Text("Muriel connection", color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Enter the base URL of your running Muriel Server. Example: https://your-server.example/ or http://192.168.1.10:38472/", color = Color.LightGray, fontSize = 13.sp)
+                    OutlinedTextField(value = settingsDraft, onValueChange = { settingsDraft = it }, singleLine = true,
+                        placeholder = { Text("https://your-muriel-server/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                    Text("Use HTTPS on public networks. HTTP is suitable only on a trusted local network.", color = Color.Gray, fontSize = 11.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                scope.launch {
+                    val cleaned = settingsDraft.trim()
+                    if (cleaned.startsWith("https://") || cleaned.startsWith("http://")) {
+                        settings.setServerUrl(cleaned)
+                        showSettings = false
+                    } else error = "Enter a valid http:// or https:// server URL."
+                }
+            }) { Text("Save", color = ChronoOrange) } },
+            dismissButton = { TextButton(onClick = { showSettings = false }) { Text("Cancel", color = Color.LightGray) } })
+    }
+
+    if (showLyrics) {
+        AlertDialog(onDismissRequest = { showLyrics = false }, containerColor = Color(0xFF171717),
+            title = { Text("Lyrics", color = Color.White) },
+            text = { Text(lyrics.ifBlank { "No lyrics were found for this track." }, color = Color.LightGray) },
+            confirmButton = { TextButton(onClick = { showLyrics = false }) { Text("Close", color = ChronoOrange) } })
+    }
+}
+
+@Composable
+private fun HomeContent(tracks: List<TrackDto>, loading: Boolean, onPlay: (TrackDto) -> Unit, onDownload: (TrackDto) -> Unit, onExplore: () -> Unit) {
+    LazyColumn(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        item {
+            Surface(color = Color(0xFF1C1715), shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("YOUR SOUND. YOUR TIME.", color = ChronoOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                    Text("Find your next favourite.", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                    Text("Search across YouTube, YouTube Music and SoundCloud through your Muriel server.", color = Color(0xFFB4A7A2), fontSize = 13.sp)
+                    Button(onClick = onExplore, colors = ButtonDefaults.buttonColors(containerColor = ChronoOrange, contentColor = Color.Black)) { Text("Explore music", fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+        item { SectionTitle("Trending now", "Fresh picks from your Muriel server") }
+        if (loading && tracks.isEmpty()) item { LinearProgressIndicator(Modifier.fillMaxWidth(), color = ChronoOrange) }
+        if (tracks.isEmpty() && !loading) item { EmptyState("Connect Muriel to load trending music.") }
+        items(tracks) { TrackRow(it, onPlay, onDownload) }
+    }
+}
+
+@Composable
+private fun SearchContent(query: String, onQuery: (String) -> Unit, platform: String, onPlatform: (String) -> Unit,
+    tracks: List<TrackDto>, loading: Boolean, onSearch: () -> Unit, onPlay: (TrackDto) -> Unit, onDownload: (TrackDto) -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.weight(1f), singleLine = true,
+                placeholder = { Text("Songs, artists, albums…") }, leadingIcon = { Icon(Icons.Default.Search, null) })
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onSearch, enabled = query.isNotBlank()) { Icon(Icons.Default.ArrowForward, "Search", tint = ChronoOrange) }
+        }
+        Row(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("youtube" to "YouTube", "ytmusic" to "YT Music", "soundcloud" to "SoundCloud").forEach { (key, label) ->
+                FilterChip(selected = platform == key, onClick = { onPlatform(key) }, label = { Text(label, fontSize = 11.sp) })
+            }
+        }
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = ChronoOrange)
+        if (tracks.isEmpty() && !loading) EmptyState("Search to discover tracks from your connected sources.")
+        LazyColumn(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(tracks) { TrackRow(it, onPlay, onDownload) }
         }
     }
 }
 
 @Composable
-private fun HomeScreen() {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp)
-    ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("CHRONO", color = ChronoOrange, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                    Text("PLAY", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
-                }
-                IconButton(onClick = {}) { Icon(Icons.Default.Settings, "Settings", tint = Color.LightGray) }
-            }
+private fun TrackList(title: String, subtitle: String, tracks: List<TrackDto>, loading: Boolean, onPlay: (TrackDto) -> Unit, onDownload: (TrackDto) -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { SectionTitle(title, subtitle) }
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = ChronoOrange)
+        if (tracks.isEmpty() && !loading) EmptyState("Nothing here yet. Connect Muriel or try Discover.")
+        LazyColumn(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(tracks) { TrackRow(it, onPlay, onDownload) }
         }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("YOUR SOUND. YOUR TIME.", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, lineHeight = 29.sp)
-                Text("A world of music, tuned to you.", color = Color(0xFF929292), fontSize = 14.sp)
-            }
+    }
+}
+
+@Composable
+private fun TrackRow(track: TrackDto, onPlay: (TrackDto) -> Unit, onDownload: (TrackDto) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onPlay(track) }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!track.thumbnail.isNullOrBlank()) {
+            AsyncImage(model = track.thumbnail, contentDescription = null, modifier = Modifier.size(54.dp).background(Color(0xFF202020), RoundedCornerShape(9.dp)))
+        } else Box(Modifier.size(54.dp).background(Color(0xFF241A17), RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.MusicNote, null, tint = ChronoOrange)
         }
-        item {
-            Surface(
-                color = Color(0xFF1C1715),
-                shape = RoundedCornerShape(22.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("MADE FOR THE MOMENT", color = ChronoOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                    Text("Press play.
-Leave the noise behind.", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, lineHeight = 30.sp)
-                    Text("Your next favourite track is one search away.", color = Color(0xFFB4A7A2), fontSize = 13.sp)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = ChronoOrange, shape = RoundedCornerShape(50), modifier = Modifier.clickable { }.padding(0.dp)) {
-                            Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Start listening", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
-            }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(track.artist, color = Color.Gray, fontSize = 12.sp, maxLines = 1)
+            Text(formatDuration(track.duration), color = Color(0xFF777777), fontSize = 10.sp)
         }
-        item { SectionTitle("Your rotation", "Made for your taste") }
-        item { EmptyMusicCard("Your daily mix is taking shape", "Play a few tracks and CHRONO will learn your sound.") }
-        item { SectionTitle("Explore", "Find something new") }
-        item { EmptyMusicCard("Discover your next favourite", "Trending music and recommendations arrive in the next build.") }
+        IconButton(onClick = { onDownload(track) }) { Icon(Icons.Default.Download, "Download", tint = Color.LightGray) }
+        IconButton(onClick = { onPlay(track) }) { Icon(Icons.Default.PlayCircle, "Play", tint = ChronoOrange, modifier = Modifier.size(28.dp)) }
+    }
+}
+
+@Composable
+private fun MiniPlayer(track: TrackDto, onToggle: () -> Unit) {
+    Surface(color = Color(0xFF1B1B1B), modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.GraphicEq, null, tint = ChronoOrange, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(track.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(track.artist, color = Color.Gray, fontSize = 10.sp, maxLines = 1)
+            }
+            IconButton(onClick = onToggle) { Icon(Icons.Default.PlayArrow, "Play or pause", tint = Color.White) }
+        }
     }
 }
 
@@ -140,88 +305,15 @@ private fun SectionTitle(title: String, subtitle: String) {
         Text(subtitle, color = Color(0xFF858585), fontSize = 12.sp)
     }
 }
-
-@Composable
-private fun EmptyMusicCard(title: String, subtitle: String) {
-    Surface(color = Color(0xFF141414), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(52.dp).background(Color(0xFF29201D), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.GraphicEq, null, tint = ChronoOrange, modifier = Modifier.size(26.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Spacer(Modifier.height(4.dp))
-                Text(subtitle, color = Color(0xFF858585), fontSize = 12.sp, lineHeight = 17.sp)
-            }
-        }
+@Composable private fun EmptyState(message: String) {
+    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Default.MusicOff, null, tint = ChronoOrange, modifier = Modifier.size(34.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(message, color = Color.Gray, fontSize = 13.sp)
     }
 }
-
-@Composable
-private fun SimpleScreen(title: String, description: String) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text(title, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(description, color = Color(0xFF929292), fontSize = 14.sp)
-    }
+private fun formatDuration(value: Double?): String {
+    val seconds = (value ?: 0.0).toInt().coerceAtLeast(0)
+    return String.format(Locale.getDefault(), "%d:%02d", seconds / 60, seconds % 60)
 }
-
-@Composable
-private fun MiniPlayer(onClick: () -> Unit) {
-    Surface(color = Color(0xFF1B1B1B), modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).background(Color(0xFF30201B), RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.MusicNote, null, tint = ChronoOrange)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Nothing playing yet", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text("Pick a track to get started", color = Color(0xFF858585), fontSize = 11.sp)
-            }
-            Icon(Icons.Default.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(28.dp))
-        }
-    }
-}
-
-@Composable
-private fun PlayerSheet(onClose: () -> Unit) {
-    Surface(color = Color(0xFF090909).copy(alpha = 0.98f), modifier = Modifier.fillMaxSize()) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 22.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.Default.KeyboardArrowDown, "Close player", tint = Color.White) }
-                Spacer(Modifier.weight(1f))
-                Text("NOW PLAYING", color = Color(0xFF999999), fontSize = 10.sp, letterSpacing = 2.sp)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = {}) { Icon(Icons.Default.MoreHoriz, "More", tint = Color.White) }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                Box(Modifier.fillMaxWidth().aspectRatio(1f).background(Color(0xFF211713), RoundedCornerShape(26.dp)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.GraphicEq, null, tint = ChronoOrange, modifier = Modifier.size(100.dp))
-                }
-                Text("No track selected", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Your music starts here", color = Color(0xFF999999), fontSize = 14.sp)
-            }
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                LinearProgressIndicator(progress = { 0f }, modifier = Modifier.fillMaxWidth(), color = ChronoOrange, trackColor = Color(0xFF333333))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("0:00", color = Color.Gray, fontSize = 11.sp)
-                    Text("0:00", color = Color.Gray, fontSize = 11.sp)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Shuffle, "Shuffle", tint = Color.Gray)
-                    Icon(Icons.Default.SkipPrevious, "Previous", tint = Color.White, modifier = Modifier.size(32.dp))
-                    Surface(color = ChronoOrange, shape = RoundedCornerShape(50), modifier = Modifier.size(64.dp)) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.PlayArrow, "Play", tint = Color.Black, modifier = Modifier.size(36.dp)) }
-                    }
-                    Icon(Icons.Default.SkipNext, "Next", tint = Color.White, modifier = Modifier.size(32.dp))
-                    Icon(Icons.Default.Repeat, "Repeat", tint = Color.Gray)
-                }
-            }
-        }
-    }
-}
+private fun safeFileName(value: String): String = value.replace(Regex("[^A-Za-z0-9 ._-]"), "_").take(90).trim()
