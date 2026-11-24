@@ -17,6 +17,7 @@ class LocalMediaEngine(private val context: Context) {
     private val workDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: context.filesDir, "chrono-work")
 
     suspend fun search(query: String, platform: String): List<TrackDto> = withContext(Dispatchers.IO) {
+        ensureInitialized()
         require(query.isNotBlank()) { "Enter a song or artist to search." }
         check(workDir.mkdirs() || workDir.isDirectory) { "Storage is unavailable." }
         val prefix = if (platform == "soundcloud") "scsearch20:" else "ytsearch20:"
@@ -37,12 +38,14 @@ class LocalMediaEngine(private val context: Context) {
     }
 
     suspend fun resolve(track: TrackDto): String = withContext(Dispatchers.IO) {
+        ensureInitialized()
         val source = track.url ?: error("This result has no source URL.")
         YoutubeDL.getInstance().getInfo(source).url?.takeIf { it.isNotBlank() }
             ?: error("The source did not provide a playable audio stream.")
     }
 
     suspend fun download(track: TrackDto): Uri = withContext(Dispatchers.IO) {
+        ensureInitialized()
         check(workDir.mkdirs() || workDir.isDirectory) { "Cannot create the download workspace." }
         val safeId = (track.id ?: track.title).replace(Regex("[^A-Za-z0-9_-]"), "_").take(60)
         val request = YoutubeDLRequest(track.url ?: error("This result has no source URL."))
@@ -108,9 +111,24 @@ class LocalMediaEngine(private val context: Context) {
         }
     }
 
+    private fun ensureInitialized() {
+        synchronized(INIT_LOCK) {
+            if (!initialized) {
+                YoutubeDL.getInstance().init(context.applicationContext)
+                com.yausername.youtubedl_android.FFmpeg.getInstance().init(context.applicationContext)
+                initialized = true
+            }
+        }
+    }
+
     private fun safeName(value: String) = value.replace(Regex("[^A-Za-z0-9 ._-]"), "_").trim().take(120).ifBlank { "CHRONO PLAY track" }
     private fun call(target: Any, method: String): Any? = runCatching {
         target.javaClass.methods.first { it.name == method && it.parameterCount == 0 }.invoke(target)
     }.getOrNull()
     private fun value(target: Any, method: String): Any? = call(target, method)
+
+    companion object {
+        private val INIT_LOCK = Any()
+        @Volatile private var initialized = false
+    }
 }
