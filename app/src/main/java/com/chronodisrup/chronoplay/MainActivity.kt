@@ -54,9 +54,6 @@ class MainActivity : ComponentActivity() {
 private fun ChronoRoot(context: Context) {
     val scope = rememberCoroutineScope()
     val localEngine = remember { LocalMediaEngine(context) }
-    var serverUrl by remember { mutableStateOf("") }
-    var serverToken by remember { mutableStateOf("hellozhou") }
-    var repository by remember { mutableStateOf<MurielRepository?>(null) }
     var selected by remember { mutableStateOf(Destination.HOME) }
     var platform by remember { mutableStateOf("youtube") }
     var query by remember { mutableStateOf("") }
@@ -67,28 +64,8 @@ private fun ChronoRoot(context: Context) {
     var currentTrack by remember { mutableStateOf<TrackDto?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showSettings by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var lyrics by remember { mutableStateOf("") }
-    var settingsDraft by remember { mutableStateOf("") }
-    var tokenDraft by remember { mutableStateOf("hellozhou") }
-
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.flow.combine(settings.serverUrl, settings.serverToken) { url, token -> url to token }.collect { (savedUrl, savedToken) ->
-            serverUrl = savedUrl
-            serverToken = savedToken
-            repository = savedUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let {
-                runCatching { MurielRepository(it, savedToken) }.getOrNull()
-            }
-        }
-    }
-    LaunchedEffect(repository) {
-        val repo = repository ?: return@LaunchedEffect
-        loading = true
-        error = null
-        try { trending = repo.trending() } catch (e: Exception) { error = e.message ?: "Could not load Muriel data." }
-        finally { loading = false }
-    }
 
     fun play(track: TrackDto) {
         currentTrack = track
