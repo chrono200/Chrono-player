@@ -152,11 +152,9 @@ private fun ChronoRoot(context: Context) {
                 Destination.HOME -> HomeContent(trending, loading, ::play, ::download, onExplore = { selected = Destination.SEARCH })
                 Destination.SEARCH -> SearchContent(query, { query = it }, platform, { platform = it }, tracks, loading,
                     onSearch = {
-                        val repo = repository
-                        if (repo == null) error = "Connect your Muriel server in Settings."
-                        else scope.launch {
+                        scope.launch {
                             loading = true; error = null
-                            try { tracks = repo.search(query.trim(), platform) }
+                            try { tracks = localEngine.search(query.trim(), platform) }
                             catch (e: Exception) { error = e.message ?: "Search failed." }
                             finally { loading = false }
                         }
