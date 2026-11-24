@@ -122,12 +122,14 @@ private fun ChronoRoot(context: Context) {
         scope.launch {
             loading = true
             try {
-                val remote = repo.download(track)
+                val result = repo.download(track)
+                val remote = result.downloadUrl!!
+                val fileName = safeFileName(result.filename ?: (track.artist + " - " + track.title + ".mp3"))
                 val request = DownloadManager.Request(Uri.parse(remote))
                     .setTitle(track.title)
                     .setDescription("CHRONO PLAY • ${track.artist}")
                     .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "CHRONO PLAY/${safeFileName(track.artist + " - " + track.title)}.mp3")
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "CHRONO PLAY/$fileName")
                 (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
                 error = "Download queued: ${track.title}"
             } catch (e: Exception) { error = e.message ?: "Download failed." }
