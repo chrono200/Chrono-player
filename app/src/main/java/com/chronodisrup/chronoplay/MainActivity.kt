@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -218,7 +219,7 @@ private fun ChronoRoot(context: Context) {
                         placeholder = { Text("https://your-muriel-server/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         label = { Text("Server URL") })
                     OutlinedTextField(value = tokenDraft, onValueChange = { tokenDraft = it }, singleLine = true,
-                        label = { Text("Muriel access token") }, placeholder = { Text("hellozhou") })
+                        label = { Text("Muriel access token") }, placeholder = { Text("hellozhou") }, visualTransformation = PasswordVisualTransformation())
                     Text("Muriel defaults to hellozhou unless MURIEL_TOKEN is set on your server. Use HTTPS on public networks. HTTP is suitable only on a trusted local network.", color = Color.Gray, fontSize = 11.sp)
                 }
             },
