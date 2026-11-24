@@ -2,6 +2,8 @@ package com.chronodisrup.chronoplay.player
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaController
@@ -31,7 +33,7 @@ object PlaybackController {
                 callbacks.toList().also { callbacks.clear() }
             }
             waiting.forEach { callback -> runCatching { callback(ready) } }
-        }, Executor { it.run() })
+        }, Executor { command -> Handler(Looper.getMainLooper()).post(command) })
     }
 
     fun play(url: String, title: String, artist: String) {
