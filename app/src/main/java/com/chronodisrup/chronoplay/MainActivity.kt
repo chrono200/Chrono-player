@@ -91,8 +91,16 @@ private fun ChronoRoot(context: Context) {
     }
 
     fun play(track: TrackDto) {
-        val repo = repository ?: run { error = "Add your Muriel server URL in Settings first."; return }
         currentTrack = track
+        if (track.platform == "device") {
+            val localUri = track.url ?: return
+            PlaybackController.connect(context) { ready ->
+                if (ready) PlaybackController.play(localUri, track.title, track.artist)
+                else error = "The playback service could not start."
+            }
+            return
+        }
+        val repo = repository ?: run { error = "Add your Muriel server URL in Settings first."; return }
         scope.launch {
             loading = true
             error = null
@@ -152,7 +160,11 @@ private fun ChronoRoot(context: Context) {
                         }
                         NavigationBarItem(selected = selected == dest, onClick = {
                             selected = dest
-                            if (dest == Destination.LIBRARY) scope.launch { runCatching { library = repository?.offlineLibrary().orEmpty() } }
+                            if (dest == Destination.LIBRARY) scope.launch {
+                                val deviceTracks = queryDeviceDownloads(context)
+                                val serverTracks = runCatching { repository?.offlineLibrary().orEmpty() }.getOrDefault(emptyList())
+                                library = deviceTracks + serverTracks
+                            }
                             if (dest == Destination.DISCOVER) scope.launch {
                                 loading = true
                                 try { discover = repository?.discover(emptyList(), emptyList()).orEmpty() } catch (e: Exception) { error = e.message }
@@ -188,7 +200,7 @@ private fun ChronoRoot(context: Context) {
                         }
                     }, onPlay = ::play, onDownload = ::download)
                 Destination.DISCOVER -> TrackList("Discover", "Recommendations from Muriel", discover, loading, ::play, ::download)
-                Destination.LIBRARY -> TrackList("Offline cache", "Tracks cached on your Muriel server", library, loading, ::play, ::download)
+                Destination.LIBRARY -> TrackList("Your library", "Device downloads and your Muriel server cache", library, loading, ::play, ::download)
             }
             error?.let { message ->
                 Text(message, color = ChronoOrange, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp))
@@ -339,3 +351,30 @@ private fun formatDuration(value: Double?): String {
     return String.format(Locale.getDefault(), "%d:%02d", seconds / 60, seconds % 60)
 }
 private fun safeFileName(value: String): String = value.replace(Regex("[^A-Za-z0-9 ._-]"), "_").take(90).trim()
+
+
+private fun queryDeviceDownloads(context: Context): List<TrackDto> {
+    val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    val cursor = manager.query(DownloadManager.Query().setFilterByStatus(DownloadManager.STATUS_SUCCESSFUL))
+    val items = mutableListOf<TrackDto>()
+    cursor.use { rows ->
+        val idColumn = rows.getColumnIndex(DownloadManager.COLUMN_ID)
+        val titleColumn = rows.getColumnIndex(DownloadManager.COLUMN_TITLE)
+        val descriptionColumn = rows.getColumnIndex(DownloadManager.COLUMN_DESCRIPTION)
+        val localUriColumn = rows.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+        while (rows.moveToNext()) {
+            val localUri = if (localUriColumn >= 0) rows.getString(localUriColumn) else null
+            if (localUri.isNullOrBlank()) continue
+            val description = if (descriptionColumn >= 0) rows.getString(descriptionColumn).orEmpty() else ""
+            val artist = description.substringAfter("•", "Downloaded").trim()
+            items += TrackDto(
+                id = "device_${if (idColumn >= 0) rows.getLong(idColumn) else items.size}",
+                title = if (titleColumn >= 0) rows.getString(titleColumn).orEmpty() else "Downloaded track",
+                artist = artist,
+                url = localUri,
+                platform = "device"
+            )
+        }
+    }
+    return items
+}
