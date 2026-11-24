@@ -9,6 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         applicationId = "com.chronodisrup.chronoplay"
         minSdk = 23
         targetSdk = 35
@@ -28,6 +29,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    packaging { jniLibs { useLegacyPackaging = true } }
 }
 
 dependencies {
@@ -49,5 +51,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
