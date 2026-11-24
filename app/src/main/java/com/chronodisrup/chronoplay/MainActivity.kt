@@ -77,12 +77,11 @@ private fun ChronoRoot(context: Context) {
             }
             return
         }
-        val repo = repository ?: run { error = "Add your Muriel server URL in Settings first."; return }
         scope.launch {
             loading = true
             error = null
             try {
-                val streamUrl = repo.stream(track)
+                val streamUrl = localEngine.resolve(track)
                 PlaybackController.connect(context) { ready ->
                     if (ready) PlaybackController.play(streamUrl, track.title, track.artist)
                     else error = "The playback service could not start."
@@ -93,30 +92,18 @@ private fun ChronoRoot(context: Context) {
     }
 
     fun loadLyrics(track: TrackDto) {
-        val repo = repository ?: run { error = "Configure Muriel in Settings first."; return }
-        scope.launch {
-            loading = true
-            try { lyrics = repo.lyrics(track); showLyrics = true }
-            catch (e: Exception) { error = e.message ?: "Could not load lyrics." }
-            finally { loading = false }
-        }
+        error = "Lyrics are not enabled in standalone mode yet."
     }
 
     fun download(track: TrackDto) {
-        val repo = repository ?: run { error = "Configure Muriel in Settings first."; return }
+        if (track.platform == "device") { error = "This track is already downloaded."; return }
         scope.launch {
             loading = true
+            error = null
             try {
-                val result = repo.download(track)
-                val remote = result.downloadUrl!!
-                val fileName = safeFileName(result.filename ?: (track.artist + " - " + track.title + ".mp3"))
-                val request = DownloadManager.Request(Uri.parse(remote))
-                    .setTitle(track.title)
-                    .setDescription("CHRONO PLAY • ${track.artist}")
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "CHRONO PLAY/$fileName")
-                (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-                error = "Download queued: ${track.title}"
+                localEngine.download(track)
+                error = "Saved to Music/CHRONO PLAY: " + track.title
+                library = localEngine.downloadedTracks()
             } catch (e: Exception) { error = e.message ?: "Download failed." }
             finally { loading = false }
         }
