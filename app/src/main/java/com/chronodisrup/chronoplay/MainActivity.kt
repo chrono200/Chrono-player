@@ -311,7 +311,7 @@ private fun TrackRow(track: TrackDto, onPlay: (TrackDto) -> Unit, onDownload: (T
             Text(track.artist, color = Color.Gray, fontSize = 12.sp, maxLines = 1)
             Text(formatDuration(track.duration), color = Color(0xFF777777), fontSize = 10.sp)
         }
-        IconButton(onClick = { onDownload(track) }) { Icon(Icons.Default.Download, "Download", tint = Color.LightGray) }
+        IconButton(onClick = { onDownload(track) }, enabled = track.platform != "device") { Icon(Icons.Default.Download, "Download", tint = if (track.platform == "device") Color.DarkGray else Color.LightGray) }
         IconButton(onClick = { onPlay(track) }) { Icon(Icons.Default.PlayCircle, "Play", tint = ChronoOrange, modifier = Modifier.size(28.dp)) }
     }
 }
