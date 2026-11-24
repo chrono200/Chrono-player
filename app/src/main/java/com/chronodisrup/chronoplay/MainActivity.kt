@@ -54,6 +54,7 @@ private fun ChronoRoot(context: Context) {
     val scope = rememberCoroutineScope()
     val settings = remember { SettingsStore(context) }
     var serverUrl by remember { mutableStateOf("") }
+    var serverToken by remember { mutableStateOf("hellozhou") }
     var repository by remember { mutableStateOf<MurielRepository?>(null) }
     var selected by remember { mutableStateOf(Destination.HOME) }
     var platform by remember { mutableStateOf("youtube") }
@@ -69,11 +70,15 @@ private fun ChronoRoot(context: Context) {
     var showLyrics by remember { mutableStateOf(false) }
     var lyrics by remember { mutableStateOf("") }
     var settingsDraft by remember { mutableStateOf("") }
+    var tokenDraft by remember { mutableStateOf("hellozhou") }
 
     LaunchedEffect(Unit) {
-        settings.serverUrl.collect { saved ->
-            serverUrl = saved
-            repository = saved.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let { runCatching { MurielRepository(it) }.getOrNull() }
+        kotlinx.coroutines.flow.combine(settings.serverUrl, settings.serverToken) { url, token -> url to token }.collect { (savedUrl, savedToken) ->
+            serverUrl = savedUrl
+            serverToken = savedToken
+            repository = savedUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }?.let {
+                runCatching { MurielRepository(it, savedToken) }.getOrNull()
+            }
         }
     }
     LaunchedEffect(repository) {
@@ -154,7 +159,7 @@ private fun ChronoRoot(context: Context) {
                     Text("CHRONO", color = ChronoOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("PLAY", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                 }
-                IconButton(onClick = { settingsDraft = serverUrl; showSettings = true }) { Icon(Icons.Default.Settings, "Settings", tint = Color.LightGray) }
+                IconButton(onClick = { settingsDraft = serverUrl; tokenDraft = serverToken; showSettings = true }) { Icon(Icons.Default.Settings, "Settings", tint = Color.LightGray) }
             }
             when (selected) {
                 Destination.HOME -> HomeContent(trending, loading, ::play, ::download, onExplore = { selected = Destination.SEARCH })
@@ -185,15 +190,18 @@ private fun ChronoRoot(context: Context) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Enter the base URL of your running Muriel Server. Example: https://your-server.example/ or http://192.168.1.10:38472/", color = Color.LightGray, fontSize = 13.sp)
                     OutlinedTextField(value = settingsDraft, onValueChange = { settingsDraft = it }, singleLine = true,
-                        placeholder = { Text("https://your-muriel-server/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                    Text("Use HTTPS on public networks. HTTP is suitable only on a trusted local network.", color = Color.Gray, fontSize = 11.sp)
+                        placeholder = { Text("https://your-muriel-server/") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        label = { Text("Server URL") })
+                    OutlinedTextField(value = tokenDraft, onValueChange = { tokenDraft = it }, singleLine = true,
+                        label = { Text("Muriel access token") }, placeholder = { Text("hellozhou") })
+                    Text("Muriel defaults to hellozhou unless MURIEL_TOKEN is set on your server. Use HTTPS on public networks. HTTP is suitable only on a trusted local network.", color = Color.Gray, fontSize = 11.sp)
                 }
             },
             confirmButton = { TextButton(onClick = {
                 scope.launch {
                     val cleaned = settingsDraft.trim()
                     if (cleaned.startsWith("https://") || cleaned.startsWith("http://")) {
-                        settings.setServerUrl(cleaned)
+                        settings.saveConnection(cleaned, tokenDraft)
                         showSettings = false
                     } else error = "Enter a valid http:// or https:// server URL."
                 }
