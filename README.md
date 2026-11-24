@@ -29,7 +29,7 @@ gradle assembleDebug
 
 ## Connect Muriel
 
-1. Deploy or run [Muriel Server](https://github.com/zhou9899/muriel-server).
+1. Deploy or run [Muriel Server](https://github.com/zhou9899/muriel-server). It requires Node.js 18+, `yt-dlp` and `ffmpeg`. For a LAN server, start it with `HOST=0.0.0.0 PORT=38472 npm start` from the Muriel repository. On the same Android device, use `http://127.0.0.1:38472/`.
 2. Open CHRONO PLAY → Settings.
 3. Enter the server base URL, including the port if self-hosted, e.g. `http://192.168.1.10:38472/` or your HTTPS deployment URL.
 4. Enter the Muriel token. The server defaults to `hellozhou`; if you configured `MURIEL_TOKEN`, enter that value instead.
