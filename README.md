@@ -1,6 +1,6 @@
 # CHRONO PLAY
 
-A native Android music player by Chronodisrup. Built with Kotlin, Jetpack Compose and AndroidX Media3, powered by a self-hosted Muriel Server.
+A native Android music player by Chronodisrup. Built with Kotlin, Jetpack Compose, AndroidX Media3 and an embedded Android yt-dlp engine. No server URL, token, account or manual backend setup is required.
 
 ## Current implementation
 
@@ -10,7 +10,7 @@ A native Android music player by Chronodisrup. Built with Kotlin, Jetpack Compos
 - Muriel-backed stream resolution and Android background playback service.
 - Media notification / lock-screen session foundation through Media3.
 - Server-cache library view.
-- Track download requests routed through Muriel, then downloaded to the phone's Music/CHRONO PLAY folder using Android DownloadManager.
+- Direct on-device audio extraction and MP3 downloads to the public Music/CHRONO PLAY folder using Android MediaStore.
 - Lyrics lookup through Muriel.
 - Configurable server URL and access token saved with Android DataStore.
 - Handles Muriel's loopback media URLs by routing them back through the configured server host.
@@ -27,42 +27,7 @@ Open the repository in Android Studio and sync Gradle. The repository currently 
 gradle assembleDebug
 ```
 
-## Connect Muriel
-
-1. Deploy or run [Muriel Server](https://github.com/zhou9899/muriel-server). It requires Node.js 18+, `yt-dlp` and `ffmpeg`. For a LAN server, start it with `HOST=0.0.0.0 PORT=38472 npm start` from the Muriel repository. On the same Android device, use `http://127.0.0.1:38472/`.
-2. Open CHRONO PLAY → Settings.
-3. Enter the server base URL, including the port if self-hosted, e.g. `http://192.168.1.10:38472/` or your HTTPS deployment URL.
-4. Enter the Muriel token. The server defaults to `hellozhou`; if you configured `MURIEL_TOKEN`, enter that value instead.
-5. Save, then search or play.
-
-The app sends the token in the `X-Muriel-Token` request header. Muriel also adds the token to media URLs because Android's audio player and DownloadManager cannot attach the custom header to every media request.
-
-### Important network notes
-
-- For a phone to reach a server on your LAN, Muriel must listen on a network-accessible interface (for example `HOST=0.0.0.0`) and the phone and server must be on the same network.
-- Use HTTPS for a server exposed to the internet. The app permits HTTP to support private LAN deployments; do not send the token over an untrusted network.
-- Do not expose an unauthenticated or default-token Muriel instance publicly. Set a long random `MURIEL_TOKEN` for any remotely reachable deployment.
-- Muriel's `/api/offline-library` is the server's cache, not the phone's offline library. CHRONO PLAY sends completed downloads to the device's Music folder separately.
-
-## Backend integration
-
-The Android client maps the core Muriel API surfaces:
-
-| Feature | Muriel routes |
-| --- | --- |
-| Search and browse | `/api/search`, `/api/trending`, `/api/hot` |
-| Artist and albums | `/api/artist`, `/api/artist-matches`, `/api/artist-albums`, `/api/albums/search`, `/api/albums/tracks` |
-| Streaming and cache | `/api/stream-info`, `/api/prefetch`, `/api/check-cache`, `/api/local-track` |
-| Downloads | `/api/download`, `/api/downloaded-track` |
-| Lyrics | `/api/lyrics`, `/api/lyrics-words`, `/api/save-custom-lyrics` |
-| Recommendations | `/api/vibe`, `/api/discover` |
-| Local/server library | `/api/library`, `/api/library-add`, `/api/library-update`, `/api/library-remove`, `/api/library-file` |
-| Cached music management | `/api/offline-library`, `/api/offline-delete`, `/api/clear-offline-library` |
-| Extras | `/api/track-analysis`, `/api/translate`, `/api/tools-status` |
-
-The app does not bundle or host music. Availability, permitted playback, downloads and redistribution remain subject to the source platform's terms and applicable music rights.
-
-## Design
+## Standalone operation\n\nCHRONO PLAY runs its extractor locally on the Android device. The downloader runtime is bundled in the APK and initializes automatically when the user first searches, plays or downloads. Downloads are written to the shared Music/CHRONO PLAY folder and indexed through Android MediaStore. The app does not need a running Muriel server.\n\nThe Muriel Server repository remains the reference backend for future optional server-powered features (artist metadata, richer recommendations, synchronized cache and lyrics), but none of those features are required for basic search, playback or downloading.\n\n## Design
 
 - Background: `#090909`
 - Surface: `#141414`
@@ -71,4 +36,4 @@ The app does not bundle or host music. Availability, permitted playback, downloa
 
 ## Build verification
 
-A successful Android build has not yet been run in this environment. The next check is Gradle sync/build in Android Studio or the repository's Android CI workflow.
+The Android CI workflow builds the debug APK and publishes it as a downloadable artifact. The embedded downloader increases APK size and currently targets ARMv7 and ARM64 Android devices.
