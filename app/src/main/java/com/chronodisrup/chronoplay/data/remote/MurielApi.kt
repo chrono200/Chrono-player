@@ -38,6 +38,16 @@ interface MurielApi {
         @Query("artist") artist: String? = null, @Query("source") source: String = "itunes"): SearchResponse
     @GET("api/library") suspend fun serverLibrary(): List<TrackDto>
     @GET("api/tools-status") suspend fun toolsStatus(): ToolsStatusResponse
+    @GET("api/track-analysis") suspend fun trackAnalysis(@Query("id") id: String): TrackAnalysisResponse
+    @POST("api/track-analysis") suspend fun saveTrackAnalysis(@Body body: TrackAnalysisRequest): BasicResponse
+    @POST("api/save-custom-lyrics")
+    suspend fun saveCustomLyrics(@Query("title") title: String, @Query("artist") artist: String, @Body body: CustomLyricsRequest): BasicResponse
+    @POST("api/translate") suspend fun translate(@Body body: TranslationRequest): TranslationResponse
+    @POST("api/offline-delete") suspend fun deleteOffline(@Query("id") id: String): BasicResponse
+    @POST("api/clear-offline-library") suspend fun clearOfflineLibrary(): BasicResponse
+    @POST("api/library-add") suspend fun addLibraryItems(@Body body: Map<String, Any>): BasicResponse
+    @POST("api/library-update") suspend fun updateLibraryItem(@Body body: Map<String, Any>): BasicResponse
+    @POST("api/library-remove") suspend fun removeLibraryItem(@Body body: Map<String, Any>): BasicResponse
 }
 
 data class SearchResponse(val success: Boolean = true, val tracks: List<TrackDto> = emptyList(), val results: List<TrackDto> = emptyList(), val error: String? = null) {
@@ -61,3 +71,8 @@ data class ArtistResponse(val success: Boolean = false, val artist: Map<String, 
 data class ArtistMatchesResponse(val success: Boolean = false, val artists: List<Map<String, Any?>> = emptyList())
 data class AlbumsResponse(val success: Boolean = false, val albums: List<Map<String, Any?>> = emptyList())
 data class ToolsStatusResponse(val success: Boolean = false, val tools: Map<String, Any?>? = null)
+data class TrackAnalysisResponse(val success: Boolean = false, val analysis: Map<String, Any?>? = null)
+data class TrackAnalysisRequest(val id: String, val analysis: Map<String, Any?>)
+data class CustomLyricsRequest(val lyrics: String)
+data class TranslationRequest(val texts: List<String>, val targetLang: String = "en")
+data class TranslationResponse(val success: Boolean = false, val translations: List<String> = emptyList(), val error: String? = null)
