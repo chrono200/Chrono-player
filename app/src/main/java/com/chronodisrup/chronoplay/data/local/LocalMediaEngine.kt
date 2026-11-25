@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import com.chronodisrup.chronoplay.data.remote.TrackDto
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -20,20 +21,40 @@ class LocalMediaEngine(private val context: Context) {
         ensureInitialized()
         require(query.isNotBlank()) { "Enter a song or artist to search." }
         check(workDir.mkdirs() || workDir.isDirectory) { "Storage is unavailable." }
+
         val prefix = if (platform == "soundcloud") "scsearch20:" else "ytsearch20:"
-        val playlist = YoutubeDL.getInstance().getPlaylistInfo(prefix + query)
-        val entries = call(playlist, "getEntries") as? Iterable<*> ?: emptyList<Any>()
+        val request = YoutubeDLRequest(prefix + query)
+        request.addOption("--dump-single-json")
+        request.addOption("--flat-playlist")
+        request.addOption("--skip-download")
+        val output = YoutubeDL.getInstance().execute(request).out
+        val root = YoutubeDL.objectMapper.readTree(output)
+        val entries = root.path("entries")
+        if (!entries.isArray) return@withContext emptyList()
+
         entries.mapNotNull { entry ->
-            if (entry == null) return@mapNotNull null
-            val id = value(entry, "getId")?.toString() ?: return@mapNotNull null
-            val title = value(entry, "getTitle")?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown track"
-            val artist = (value(entry, "getUploader") ?: value(entry, "getChannel") ?: value(entry, "getArtist"))?.toString() ?: "Unknown artist"
-            val duration = (value(entry, "getDuration") as? Number)?.toDouble()
-            val thumbnail = value(entry, "getThumbnail")?.toString()
-            val webpage = (value(entry, "getWebpageUrl") ?: value(entry, "getUrl"))?.toString()
-                ?: "https://www.youtube.com/watch?v=$id"
-            TrackDto(id = id, title = title, artist = artist, duration = duration, thumbnail = thumbnail,
-                url = webpage, platform = if (platform == "soundcloud") "soundcloud" else "youtube")
+            val id = entry.path("id").asText("").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = entry.path("title").asText("Unknown track").ifBlank { "Unknown track" }
+            val artist = sequenceOf("uploader", "channel", "artist")
+                .map { entry.path(it).asText("") }
+                .firstOrNull { it.isNotBlank() } ?: "Unknown artist"
+            val duration = entry.path("duration").takeIf { it.isNumber }?.asDouble()
+            val thumbnail = entry.path("thumbnail").asText("").takeIf { it.isNotBlank() }
+                ?: entry.path("thumbnails").lastOrNull()?.path("url")?.asText()?.takeIf { it.isNotBlank() }
+            val webpage = sequenceOf("webpage_url", "original_url", "url")
+                .map { entry.path(it).asText("") }
+                .firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
+                ?: if (platform == "soundcloud") "https://soundcloud.com/$id" else "https://www.youtube.com/watch?v=$id"
+
+            TrackDto(
+                id = id,
+                title = title,
+                artist = artist,
+                duration = duration,
+                thumbnail = thumbnail,
+                url = webpage,
+                platform = if (platform == "soundcloud") "soundcloud" else "youtube"
+            )
         }.take(20)
     }
 
@@ -74,9 +95,14 @@ class LocalMediaEngine(private val context: Context) {
             val durationCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
-                out += TrackDto(id = "device_$id", title = c.getString(titleCol) ?: "Downloaded track",
-                    artist = c.getString(artistCol) ?: "Unknown artist", duration = c.getLong(durationCol) / 1000.0,
-                    url = Uri.withAppendedPath(collection, id.toString()).toString(), platform = "device")
+                out += TrackDto(
+                    id = "device_$id",
+                    title = c.getString(titleCol) ?: "Downloaded track",
+                    artist = c.getString(artistCol) ?: "Unknown artist",
+                    duration = c.getLong(durationCol) / 1000.0,
+                    url = Uri.withAppendedPath(collection, id.toString()).toString(),
+                    platform = "device"
+                )
             }
         }
         out
@@ -115,17 +141,13 @@ class LocalMediaEngine(private val context: Context) {
         synchronized(INIT_LOCK) {
             if (!initialized) {
                 YoutubeDL.getInstance().init(context.applicationContext)
-                com.yausername.youtubedl_android.FFmpeg.getInstance().init(context.applicationContext)
+                FFmpeg.getInstance().init(context.applicationContext)
                 initialized = true
             }
         }
     }
 
     private fun safeName(value: String) = value.replace(Regex("[^A-Za-z0-9 ._-]"), "_").trim().take(120).ifBlank { "CHRONO PLAY track" }
-    private fun call(target: Any, method: String): Any? = runCatching {
-        target.javaClass.methods.first { it.name == method && it.parameterCount == 0 }.invoke(target)
-    }.getOrNull()
-    private fun value(target: Any, method: String): Any? = call(target, method)
 
     companion object {
         private val INIT_LOCK = Any()
