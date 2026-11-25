@@ -12,6 +12,7 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 
 class LocalMediaEngine(private val context: Context) {
@@ -28,33 +29,40 @@ class LocalMediaEngine(private val context: Context) {
         request.addOption("--flat-playlist")
         request.addOption("--skip-download")
         val output = YoutubeDL.getInstance().execute(request).out
-        val root = YoutubeDL.objectMapper.readTree(output)
-        val entries = root.path("entries")
-        if (!entries.isArray) return@withContext emptyList()
+        val entries = JSONObject(output).optJSONArray("entries") ?: return@withContext emptyList()
 
-        entries.mapNotNull { entry ->
-            val id = entry.path("id").asText("").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val title = entry.path("title").asText("Unknown track").ifBlank { "Unknown track" }
-            val artist = sequenceOf("uploader", "channel", "artist")
-                .map { entry.path(it).asText("") }
-                .firstOrNull { it.isNotBlank() } ?: "Unknown artist"
-            val duration = entry.path("duration").takeIf { it.isNumber }?.asDouble()
-            val thumbnail = entry.path("thumbnail").asText("").takeIf { it.isNotBlank() }
-                ?: entry.path("thumbnails").lastOrNull()?.path("url")?.asText()?.takeIf { it.isNotBlank() }
-            val webpage = sequenceOf("webpage_url", "original_url", "url")
-                .map { entry.path(it).asText("") }
-                .firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
-                ?: if (platform == "soundcloud") "https://soundcloud.com/$id" else "https://www.youtube.com/watch?v=$id"
+        buildList {
+            for (index in 0 until entries.length()) {
+                val entry = entries.optJSONObject(index) ?: continue
+                val id = entry.optString("id").takeIf { it.isNotBlank() } ?: continue
+                val title = entry.optString("title").ifBlank { "Unknown track" }
+                val artist = sequenceOf("uploader", "channel", "artist")
+                    .map { entry.optString(it) }
+                    .firstOrNull { it.isNotBlank() } ?: "Unknown artist"
+                val duration = if (entry.has("duration") && !entry.isNull("duration")) entry.optDouble("duration").takeIf { it.isFinite() } else null
+                val thumbnail = entry.optString("thumbnail").takeIf { it.isNotBlank() }
+                    ?: entry.optJSONArray("thumbnails")?.let { thumbs ->
+                        (thumbs.length() - 1 downTo 0).firstNotNullOfOrNull { i ->
+                            thumbs.optJSONObject(i)?.optString("url")?.takeIf { it.isNotBlank() }
+                        }
+                    }
+                val webpage = sequenceOf("webpage_url", "original_url", "url")
+                    .map { entry.optString(it) }
+                    .firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
+                    ?: if (platform == "soundcloud") "https://soundcloud.com/$id" else "https://www.youtube.com/watch?v=$id"
 
-            TrackDto(
-                id = id,
-                title = title,
-                artist = artist,
-                duration = duration,
-                thumbnail = thumbnail,
-                url = webpage,
-                platform = if (platform == "soundcloud") "soundcloud" else "youtube"
-            )
+                add(
+                    TrackDto(
+                        id = id,
+                        title = title,
+                        artist = artist,
+                        duration = duration,
+                        thumbnail = thumbnail,
+                        url = webpage,
+                        platform = if (platform == "soundcloud") "soundcloud" else "youtube"
+                    )
+                )
+            }
         }.take(20)
     }
 
